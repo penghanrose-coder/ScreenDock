@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -114,10 +114,10 @@ namespace ScreenDock {
    if(mode.width==0 || mode.height==0) throw new Exception("没有可用的屏幕模式，请先在 Windows 显示设置中启用此屏幕。");
    mode.extra=0; return mode;
   }
-  public static void Apply(Dictionary<string,Native.Mode> modes) {
+  public static void Apply(Dictionary<string,Native.Mode> modes,string primaryDevice=null) {
    foreach(var pair in modes) {
     var mode=pair.Value; mode.extra=0;
-    int result=Native.ChangeDisplaySettingsEx(pair.Key,ref mode,IntPtr.Zero,0x10000001,IntPtr.Zero);
+    int result=Native.ChangeDisplaySettingsEx(pair.Key,ref mode,IntPtr.Zero,0x10000001u|(pair.Key==primaryDevice?0x10u:0u),IntPtr.Zero);
     if(result!=0) throw new Exception("驱动拒绝修改 "+pair.Key+"（返回码 "+result+"）。");
    }
    int applied=Native.Apply(null,IntPtr.Zero,IntPtr.Zero,0,IntPtr.Zero);
@@ -150,6 +150,7 @@ namespace ScreenDock {
   HashSet<string> brightnessPending=new HashSet<string>();
   bool BrightnessPending(Display d){return d!=null&&brightnessPending.Contains(BrightnessKey(d));}
   bool detecting,refreshPending,fullRefreshPending;
+  System.Windows.Forms.Timer topologyTimer=new System.Windows.Forms.Timer{Interval=700};
   HashSet<string> pendingModes=new HashSet<string>();
   bool ModesPending(Display d){return d!=null&&pendingModes.Contains(BrightnessKey(d));}
   async Task DetectOne(Display d,SemaphoreSlim slots){
@@ -191,12 +192,26 @@ namespace ScreenDock {
    modes=Button("应用",async delegate{await ApplyInlineMode();});modes.SetBounds(998,594,136,39);Controls.Add(modes);
    brightnessSlider.ValueChanged+=delegate{brightnessValue.Text=brightnessSlider.Value+"%";};brightnessSlider.Committed+=async delegate{await AdjustBrightness(brightnessSlider.Value);};
    AddEyeControls();Rule(0,756,1160,1);status.SetBounds(17,758,1126,22);status.Font=Art.Font(12);status.ForeColor=Art.Muted;Controls.Add(status);
+   foreach(Control c in Controls){if(c.Top>=302)c.Top+=66;else if(c==list||(c.Width==1&&c.Height>600))c.Height+=66;}ClientSize=new Size(1160,846);
+   // Keep the selected monitor heading above its resolution and refresh controls.
+   screenName.Top-=66;detail.Top-=66;foreach(Control c in Controls)if(c is Panel&&c.Top==368&&c.Height==1)c.Top=298;
+   foreach(Control c in Controls)if(c.Top>=466)c.Top+=44;AddInlineLayout();
+   // Screen selection across the top, with all settings in the full-width area below.
+   foreach(Control c in Controls){
+    if(c==list||c is MenuStrip)continue;
+    if(c.Width==1&&c.Height>600){c.Visible=false;continue;}
+    if(c.Left>=300&&c.Left<600)c.Left-=276;
+    if(c.Width>=600&&c!=status&&c.Left>0)c.Width+=276;
+    if(c.Top>=46)c.Top+=110;
+   }
+   list.MultiColumn=true;list.ColumnWidth=360;list.SetBounds(24,42,1110,100);ClientSize=new Size(1160,1000);
    map.Pick=delegate(Display d){list.SelectedIndex=displays.FindIndex(x=>x.Device==d.Device);};
-   var menu=CreateTrayMenu();
-   tray=new NotifyIcon{Icon=Icon,Text="ScreenDock · 屏幕管理",ContextMenuStrip=menu,Visible=!demo};tray.DoubleClick+=delegate{ShowWindow();};tray.BalloonTipClicked+=delegate{ShowWindow();};
+   trayMenu=CreateTrayMenu();
+   tray=new NotifyIcon{Icon=Icon,Text="ScreenDock · 屏幕管理",Visible=!demo};tray.MouseUp+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Right)ShowTrayMenu(Cursor.Position);};tray.DoubleClick+=delegate{ShowWindow();};tray.BalloonTipClicked+=delegate{ShowWindow();};
    Resize+=delegate{if(WindowState==FormWindowState.Minimized){Hide();if(!demo)tray.ShowBalloonTip(4000,"ScreenDock","已最小化到系统托盘，双击托盘图标可重新打开。",ToolTipIcon.Info);}};
    if(startInTray&&!demo){Opacity=0;ShowInTaskbar=false;}
    Shown+=async delegate{if(startInTray&&!demo){Hide();Opacity=1;ShowInTaskbar=true;}await DetectSupport();};FormClosing+=delegate(object s,FormClosingEventArgs e){if(!quitting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();}};
+   topologyTimer.Tick+=delegate{if(busy||detecting||brightnessPending.Count>0)return;topologyTimer.Stop();try{RefreshDisplays(true);}catch(Exception ex){status.Text="刷新显示器失败："+ex.Message;}};
    UiZoom.Attach(this,false,false,true);RefreshDisplays();if(Backend.LoadWarning!=null)status.Text=Backend.LoadWarning;
   }
   void Rule(int x,int y,int w,int h){Controls.Add(new Panel{Bounds=new Rectangle(x,y,w,h),BackColor=Color.FromArgb(222,225,230)});}
@@ -211,21 +226,21 @@ namespace ScreenDock {
    using(var f=Art.Font(12*z))Art.Text(g,d.Active?d.Mode.width+" × "+d.Mode.height+"  "+d.Mode.frequency+" Hz":"已停用",f,Art.Muted,new Rectangle(r.X+s(78),r.Y+s(52),r.Width-s(86),s(26)));
   }
   Button Button(string text,EventHandler action){var b=new SoftButton{Text=text};b.Click+=action;return b;}
-  public void ShowWindow(){Show();WindowState=FormWindowState.Normal;Activate();}
+  public void ShowWindow(){Show();if(WindowState==FormWindowState.Minimized)WindowState=FormWindowState.Normal;Activate();}
   void Identify(){if(demo||busy)return;foreach(var screen in Screen.AllScreens){var d=displays.Find(x=>x.Device==screen.DeviceName);if(d==null)continue;var badge=new Form{FormBorderStyle=FormBorderStyle.None,StartPosition=FormStartPosition.Manual,Bounds=new Rectangle(screen.Bounds.X+40,screen.Bounds.Y+40,160,110),BackColor=Art.Panel,TopMost=true,ShowInTaskbar=false};badge.Controls.Add(new Label{Dock=DockStyle.Fill,Text=d.Number.ToString(),TextAlign=ContentAlignment.MiddleCenter,ForeColor=Art.Ink,Font=new Font("Segoe UI",42,FontStyle.Bold)});var timer=new System.Windows.Forms.Timer{Interval=2000};timer.Tick+=delegate{timer.Stop();badge.Close();timer.Dispose();};badge.Show();timer.Start();}}
   void RefreshDisplays(bool full=false){
-   if(busy)return;if(detecting||brightnessPending.Count>0){refreshPending=true;fullRefreshPending|=full;return;}full|=fullRefreshPending;refreshPending=fullRefreshPending=false;if(full)MonitorModes.ClearCache();string selected=Current==null?null:Current.Device;
+   if(busy){refreshPending=true;fullRefreshPending|=full;return;}if(detecting||brightnessPending.Count>0){refreshPending=true;fullRefreshPending|=full;return;}full|=fullRefreshPending;refreshPending=fullRefreshPending=false;if(full){MonitorModes.ClearCache();if(!layoutDirty)layoutModes.Clear();}string selected=Current==null?null:Current.Device;
    brightnessValues.Clear();brightnessErrors.Clear();modeInfos.Clear();modeErrors.Clear();shownModeInfo=null;
    displays=demo?new List<Display>{new Display{Device="demo1",Name="Philips 27M2N6800ML",Active=true,Primary=true,Number=1,Mode=new Native.Mode{width=2560,height=1440,frequency=144}},new Display{Device="demo2",Name="Philips 275M1RZN",Active=true,Number=2,Mode=new Native.Mode{x=2560,y=180,width=1920,height=1080,frequency=60}}}:Backend.Enumerate();
    list.Items.Clear();foreach(var d in displays)list.Items.Add("屏幕 "+d.Number+"   "+(d.Primary?"主屏":d.Active?"已启用":"已停用"));
-   map.Displays=displays;if(displays.Count>0)list.SelectedIndex=Math.Max(0,displays.FindIndex(d=>d.Device==selected));else SelectDisplay();
+   ReloadInlineLayout();if(displays.Count>0)list.SelectedIndex=Math.Max(0,displays.FindIndex(d=>d.Device==selected));else SelectDisplay();
    status.Text=demo?"演示界面 · 示例设备数据":"检测到 "+displays.Count+" 个显示设备 · "+displays.Count(d=>d.Active)+" 个正在使用 · 关闭窗口会保留托盘图标";map.Invalidate();if(IsHandleCreated&&!demo)BeginInvoke(new Action(async delegate{await DetectSupport();}));
   }
   Display Current {get{return displays!=null && list.SelectedIndex>=0 && list.SelectedIndex<displays.Count?displays[list.SelectedIndex]:null;}}
-  void SelectDisplay(){var d=Current;toggle.Enabled=d!=null&&!busy&&!detecting&&brightnessPending.Count==0&&!d.Primary;
+  void SelectDisplay(){UpdateInlineLayout();var d=Current;toggle.Enabled=d!=null&&!busy&&!detecting&&brightnessPending.Count==0&&!d.Primary;
    UpdateInlineModes();
    UpdateBrightnessUi();UpdateEyeUi();
-   if(d==null){detail.Text="未检测到可管理的显示器。";return;}
+   if(d==null){screenName.Text="未连接显示器";screenState.Text="";detail.Text="未检测到可管理的显示器。";map.Selected=null;map.Invalidate();return;}
    screenName.Text=d.Name;screenState.Text=d.Primary?"●  使用中  ·  主屏受保护":d.Active?"●  使用中":"○  已停用";screenState.ForeColor=d.Active?Color.FromArgb(46,145,116):Art.Muted;detail.Text=(d.Active?d.Mode.width+" × "+d.Mode.height+"  ·  "+d.Mode.frequency+" Hz":"当前已停用")+(d.Primary?"  ·  主屏受保护":"");
    toggle.Text=d.Active?"停用此屏幕":"启用此屏幕";map.Selected=d.Device;map.Invalidate();}
   void Toggle(){
@@ -266,7 +281,7 @@ namespace ScreenDock {
    if(demo&&d!=null&&info==null){info=new ModeInfo();info.Current[0x14]=5;foreach(uint v in new uint[]{1,4,5,6,8})info.Options.Add(new ModeOption{Code=0x14,Value=v,Label=MonitorModes.Label(0x14,v)});modeInfos[key]=info;}
    if(shownModeKey!=key||shownModeInfo!=info){modeChoice.Items.Clear();if(info!=null){foreach(var o in info.Options)modeChoice.Items.Add(o);if(info.Options.Count>0)modeChoice.SelectedIndex=Math.Max(0,info.Options.FindIndex(x=>info.Current.ContainsKey(x.Code)&&info.Current[x.Code]==x.Value));}shownModeInfo=info;shownModeKey=key;}
    bool available=d!=null&&d.Active&&info!=null&&info.Options.Count>0;modeChoice.Enabled=modes.Enabled=available&&!busy&&!BrightnessPending(d)&&!ModesPending(d)&&!EyeOn(d);
-   modeHint.Text=d==null?"请选择显示器":!d.Active?"请先启用屏幕。":available?"应用显示器内置模式，15 秒内确认保留。":info!=null||modeErrors.ContainsKey(key)?"未检测到可用模式；可在屏幕菜单中查看诊断。":"正在自动检测内置模式…";
+   modeHint.Text=d==null?"请选择显示器":!d.Active?"请先启用屏幕。":available?"应用显示器内置模式。":info!=null||modeErrors.ContainsKey(key)?"未检测到可用模式；可在屏幕菜单中查看诊断。":"正在自动检测内置模式…";
   }
   async Task ApplyInlineMode(){var d=Current;var option=modeChoice.SelectedItem as ModeOption;if(d==null||option==null||busy||demo||BrightnessPending(d))return;busy=true;SelectDisplay();ModeSnapshot backup=null;bool attempted=false;string failure=null;
    try{status.Text="正在备份显示器设置…";backup=await Task.Run(()=>MonitorModes.Capture(d,option));MonitorModes.SaveRecovery(d,backup);attempted=true;await Task.Run(()=>MonitorModes.WithMonitor(d,h=>{MonitorModes.SetChecked(h,option.Code,option.Value);return true;}));using(var confirm=new Confirm("显示器模式已切换，是否保留？")){if(confirm.ShowDialog(this)!=DialogResult.OK){await Task.Run(()=>MonitorModes.Restore(d,backup));status.Text="已恢复切换前设置。";}else status.Text="已保留模式。可在屏幕菜单中恢复上次设置。";attempted=false;}}
@@ -276,12 +291,13 @@ namespace ScreenDock {
   }
   void OpenModes(){var d=Current;if(d==null||busy||detecting||demo||BrightnessPending(d))return;if(EyeOn(d)){status.Text="请先关闭护眼模式并恢复设置，再调整内置模式。";return;}busy=true;SelectDisplay();try{using(var dialog=new ModeDialog(d))dialog.ShowDialog(this);}finally{busy=false;RefreshDisplays();}}
   public void Screenshot(string file){Show();if(demo&&list.Items.Count>1)list.SelectedIndex=1;Application.DoEvents();using(var bitmap=new Bitmap(Width,Height)){DrawToBitmap(bitmap,new Rectangle(0,0,Width,Height));bitmap.Save(file);}quitting=true;Close();}
-  protected override void Dispose(bool disposing){if(disposing&&tray!=null){tray.Visible=false;if(tray.ContextMenuStrip!=null)tray.ContextMenuStrip.Dispose();tray.Dispose();}base.Dispose(disposing);}
+  protected override void WndProc(ref Message m){base.WndProc(ref m);if(!demo&&topologyTimer!=null&&!IsDisposed&&!Disposing&&(m.Msg==0x007E||(m.Msg==0x0219&&m.WParam.ToInt64()==0x0007))){topologyTimer.Stop();topologyTimer.Start();}}
+  protected override void Dispose(bool disposing){if(disposing&&topologyTimer!=null)topologyTimer.Dispose();if(disposing&&tray!=null){tray.Visible=false;if(trayMenu!=null)trayMenu.Dispose();tray.Dispose();}base.Dispose(disposing);}
  }
  public static class Program {
   [STAThread] public static void Main(string[] args) {
    Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-   if(args.Length>0 && args[0]=="--make-icon"){using(var icon=Art.Icon())using(var f=File.Create(args[1]))icon.Save(f);return;}
+   if(args.Length>0 && args[0]=="--make-icon"){File.WriteAllBytes(args[1],Art.IconData());return;}
    if(args.Length>0 && args[0]=="--preview-modes"){using(var form=new ModeDialog(new Display(),true))form.Screenshot(args[1]);return;}
    if(args.Length>0 && args[0]=="--brightness-check"){
     if(Brightness.RawValue(20,220,0)!=20||Brightness.RawValue(20,220,50)!=120||Brightness.RawValue(20,220,100)!=220)throw new Exception("Brightness range conversion");

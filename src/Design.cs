@@ -19,8 +19,27 @@ namespace ScreenDock {
   public static GraphicsPath Round(RectangleF r,float radius){var p=new GraphicsPath();float d=radius*2;p.AddArc(r.X,r.Y,d,d,180,90);p.AddArc(r.Right-d,r.Y,d,d,270,90);p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);p.AddArc(r.X,r.Bottom-d,d,d,90,90);p.CloseFigure();return p;}
   public static void Fill(Graphics g,RectangleF r,float radius,Color color){using(var p=Round(r,radius))using(var b=new SolidBrush(color))g.FillPath(b,p);}
   public static void Text(Graphics g,string text,Font font,Color color,Rectangle bounds,TextFormatFlags flags=TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis){TextRenderer.DrawText(g,text,font,bounds,color,flags|TextFormatFlags.NoPadding);}
-  public static Bitmap Logo(int size){var b=new Bitmap(size,size);using(var g=Graphics.FromImage(b)){g.SmoothingMode=SmoothingMode.AntiAlias;g.ScaleTransform(size/64f,size/64f);using(var fill=new SolidBrush(Color.FromArgb(0,115,210)))g.FillRectangle(fill,7,12,50,36);using(var pen=new Pen(Color.FromArgb(25,36,49),4))g.DrawRectangle(pen,7,12,50,36);}return b;}
-  public static Icon Icon(){using(var b=Logo(64)){var h=b.GetHicon();try{return (Icon)System.Drawing.Icon.FromHandle(h).Clone();}finally{Native.DestroyIcon(h);}}}
+  public static Bitmap Logo(int size){
+   var bitmap=new Bitmap(size,size,System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+   using(var g=Graphics.FromImage(bitmap)){
+    g.Clear(Color.Transparent);g.SmoothingMode=SmoothingMode.AntiAlias;g.ScaleTransform(size/64f,size/64f);
+    Fill(g,new RectangleF(2,2,60,60),13,Color.FromArgb(13,78,157));
+    Fill(g,new RectangleF(25,14,29,23),3,Color.FromArgb(99,213,243));
+    Fill(g,new RectangleF(28,17,23,17),1,Color.FromArgb(25,116,191));
+    Fill(g,new RectangleF(10,26,34,25),3,Color.FromArgb(248,252,255));
+    Fill(g,new RectangleF(13,29,28,19),1,Color.FromArgb(25,116,191));
+   }return bitmap;
+  }
+  public static byte[] IconData(){
+   var frames=new List<byte[]>();int[] sizes={16,20,24,32,40,48,64,128,256};
+   foreach(int size in sizes)using(var bitmap=Logo(size))using(var stream=new System.IO.MemoryStream()){bitmap.Save(stream,System.Drawing.Imaging.ImageFormat.Png);frames.Add(stream.ToArray());}
+   using(var stream=new System.IO.MemoryStream())using(var writer=new System.IO.BinaryWriter(stream)){
+    writer.Write((ushort)0);writer.Write((ushort)1);writer.Write((ushort)sizes.Length);int offset=6+16*sizes.Length;
+    for(int i=0;i<sizes.Length;i++){writer.Write((byte)(sizes[i]==256?0:sizes[i]));writer.Write((byte)(sizes[i]==256?0:sizes[i]));writer.Write((byte)0);writer.Write((byte)0);writer.Write((ushort)1);writer.Write((ushort)32);writer.Write(frames[i].Length);writer.Write(offset);offset+=frames[i].Length;}
+    foreach(var frame in frames)writer.Write(frame);return stream.ToArray();
+   }
+  }
+  public static Icon Icon(){using(var stream=new System.IO.MemoryStream(IconData()))using(var icon=new Icon(stream,new Size(32,32)))return (Icon)icon.Clone();}
  }
  public class Card : Panel {
   public Card(){DoubleBuffered=true;BackColor=Art.Background;}
@@ -51,19 +70,20 @@ namespace ScreenDock {
   protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);switch(e.KeyCode){case Keys.Left:UpdateValue(value-1);break;case Keys.Right:UpdateValue(value+1);break;case Keys.Home:UpdateValue(0);break;case Keys.End:UpdateValue(100);break;case Keys.PageUp:UpdateValue(value+10);break;case Keys.PageDown:UpdateValue(value-10);break;default:return;}e.Handled=true;}
   protected override void OnKeyUp(KeyEventArgs e){base.OnKeyUp(e);if(e.KeyCode==Keys.Left||e.KeyCode==Keys.Right||e.KeyCode==Keys.Home||e.KeyCode==Keys.End||e.KeyCode==Keys.PageUp||e.KeyCode==Keys.PageDown)if(Committed!=null)Committed(this,EventArgs.Empty);}
  }
- public class Map : Control {
+ public partial class Map : Control {
   public List<Display> Displays=new List<Display>();public string Selected;public Action<Display> Pick;Dictionary<Rectangle,Display> hit=new Dictionary<Rectangle,Display>();
   public Map(){SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw,true);BackColor=Color.FromArgb(240,243,247);Cursor=Cursors.Hand;}
   protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);var g=e.Graphics;g.Clear(BackColor);g.SmoothingMode=SmoothingMode.AntiAlias;hit.Clear();
    var active=Displays.Where(d=>d.Active&&d.Mode.width>0).ToList();if(active.Count==0){Art.Text(g,"暂无活动屏幕",Art.Font(14),Art.Muted,ClientRectangle,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);return;}
    int left=active.Min(d=>d.Mode.x),top=active.Min(d=>d.Mode.y);double w=active.Max(d=>d.Mode.x+(double)d.Mode.width)-left,h=active.Max(d=>d.Mode.y+(double)d.Mode.height)-top;float scale=(float)Math.Min((Width-95)/Math.Max(w,1),(Height-90)/Math.Max(h,1));
-   foreach(var d in active){bool chosen=d.Device==Selected;var r=new Rectangle((int)((Width-w*scale)/2+(d.Mode.x-left)*scale),(int)((Height-h*scale)/2+(d.Mode.y-top)*scale)-10,Math.Max(16,(int)(d.Mode.width*scale)-10),Math.Max(16,(int)(d.Mode.height*scale)-8));
+   float ox=(float)((Width-w*scale)/2-left*scale),oy=(float)((Height-h*scale)/2-top*scale)-10;if(dragTarget!=null){scale=dragScale;ox=dragOrigin.X;oy=dragOrigin.Y;}else{lastScale=scale;lastOrigin=new PointF(ox,oy);}
+   foreach(var d in active){bool chosen=d.Device==Selected;var r=new Rectangle((int)(ox+d.Mode.x*scale),(int)(oy+d.Mode.y*scale),Math.Max(16,(int)(d.Mode.width*scale)-10),Math.Max(16,(int)(d.Mode.height*scale)-8));
     using(var path=Art.Round(r,1))using(var brush=new LinearGradientBrush(r,chosen?Color.FromArgb(57,132,228):Color.FromArgb(96,103,111),chosen?Color.FromArgb(39,109,201):Color.FromArgb(75,82,90),45)){g.FillPath(brush,path);using(var pen=new Pen(chosen?Art.Accent:Color.FromArgb(169,182,210),2))g.DrawPath(pen,path);}
     using(var f=Art.Font(32*UiZoom.Factor(this),true))Art.Text(g,d.Number.ToString(),f,Color.White,r,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
     using(var f=Art.Font(11*UiZoom.Factor(this)))Art.Text(g,d.Mode.width+" × "+d.Mode.height+"  "+d.Mode.frequency+" Hz",f,Art.Muted,new Rectangle(r.X,r.Bottom+22,r.Width,(int)(22*UiZoom.Factor(this))),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);hit[r]=d;
    }
   }
-  protected override void OnMouseClick(MouseEventArgs e){foreach(var p in hit)if(p.Key.Contains(e.Location)&&Pick!=null){Pick(p.Value);break;}}
+  protected override void OnMouseClick(MouseEventArgs e){if(DragEnabled)return;foreach(var p in hit)if(p.Key.Contains(e.Location)&&Pick!=null){Pick(p.Value);break;}}
  }
 }
 

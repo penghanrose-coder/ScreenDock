@@ -1,10 +1,16 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
-using Microsoft.Win32;
+using Microsoft.Win32;using System.Reflection;using System.Runtime.InteropServices;
 
 namespace ScreenDock {
+ public static class TrayPosition {
+  [StructLayout(LayoutKind.Sequential)]struct Identifier {public uint Size;public IntPtr Window;public uint Id;public Guid Guid;}
+  [StructLayout(LayoutKind.Sequential)]struct Rect {public int Left,Top,Right,Bottom;}
+  [DllImport("shell32.dll")]static extern int Shell_NotifyIconGetRect(ref Identifier id,out Rect rect);
+  public static bool TryGet(NotifyIcon icon,out Rectangle bounds){bounds=Rectangle.Empty;if(icon==null||!icon.Visible)return false;var flags=BindingFlags.Instance|BindingFlags.NonPublic;var idField=typeof(NotifyIcon).GetField("id",flags);var windowField=typeof(NotifyIcon).GetField("window",flags);if(idField==null||windowField==null)return false;var window=windowField.GetValue(icon) as NativeWindow;if(window==null)return false;var id=new Identifier{Size=(uint)Marshal.SizeOf(typeof(Identifier)),Window=window.Handle,Id=Convert.ToUInt32(idField.GetValue(icon)),Guid=Guid.Empty};Rect rect;if(Shell_NotifyIconGetRect(ref id,out rect)!=0||rect.Right<=rect.Left||rect.Bottom<=rect.Top)return false;bounds=Rectangle.FromLTRB(rect.Left,rect.Top,rect.Right,rect.Bottom);return true;}
+ }
  public static class StartupRegistration {
   const string KeyPath=@"Software\Microsoft\Windows\CurrentVersion\Run";
   public static string Command(string path){return "\""+path+"\" --tray";}
@@ -21,6 +27,7 @@ namespace ScreenDock {
    screen.DropDownItems.Add(new ToolStripMenuItem("刷新设备",null,delegate{RefreshDisplays(true);}){ShortcutKeys=Keys.F5});
    screen.DropDownItems.Add(new ToolStripMenuItem("识别屏幕",null,delegate{Identify();}){ShortcutKeys=Keys.Control|Keys.I});
    screen.DropDownItems.Add(new ToolStripSeparator());
+
    var connection=new ToolStripMenuItem("停用此屏幕",null,delegate{Toggle();});screen.DropDownItems.Add(connection);
    var eye=new ToolStripMenuItem("开启护眼模式",null,async delegate{await ChangeEye(true);});screen.DropDownItems.Add(eye);
    var advanced=new ToolStripMenuItem("内置模式与诊断…",null,delegate{OpenModes();});screen.DropDownItems.Add(advanced);
@@ -30,14 +37,25 @@ namespace ScreenDock {
    startup.Click+=delegate{try{StartupRegistration.Set(!StartupRegistration.Enabled());startup.Checked=StartupRegistration.Enabled();status.Text=startup.Checked?"已开启开机启动，下次登录后进入托盘。":"已关闭开机启动。";}catch(Exception ex){MessageBox.Show(this,"无法修改开机启动："+ex.Message,"ScreenDock");}};
    settings.DropDownItems.Add(new ToolStripSeparator());settings.DropDownItems.Add("Windows 显示设置…",null,delegate{System.Diagnostics.Process.Start("ms-settings:display");});
    var help=new ToolStripMenuItem("帮助(&H)");help.DropDownItems.Add(new ToolStripMenuItem("使用说明",null,delegate{System.Diagnostics.Process.Start(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"使用说明.md"));}){ShortcutKeys=Keys.F1});help.DropDownItems.Add("关于 ScreenDock",null,delegate{MessageBox.Show(this,"ScreenDock\n多显示器管理工具 · MIT 开源许可\n最小化后可从系统托盘重新打开。","关于 ScreenDock");});
-   bar.Items.AddRange(new ToolStripItem[]{file,screen,settings,help});return bar;
+   bar.Items.AddRange(new ToolStripItem[]{file,screen,PresetMenu(),settings,help});return bar;
   }
-  ContextMenuStrip CreateTrayMenu(){var menu=new ContextMenuStrip{Font=SystemFonts.MenuFont};menu.Opening+=delegate{BuildTrayMenu(menu);};return menu;}
+  ContextMenuStrip trayMenu;
+  ContextMenuStrip CreateTrayMenu(){var menu=new ContextMenuStrip{Font=SystemFonts.MenuFont};BuildTrayMenu(menu);return menu;}
+  void ShowTrayMenu(Point anchor){
+   if(trayMenu==null||trayMenu.IsDisposed)return;
+   if(trayMenu.Visible)trayMenu.Close();
+   trayMenu.SuspendLayout();try{BuildTrayMenu(trayMenu);}finally{trayMenu.ResumeLayout(true);}
+   Rectangle iconBounds;if(TrayPosition.TryGet(tray,out iconBounds)){var iconArea=Screen.FromRectangle(iconBounds).WorkingArea;anchor=new Point(iconBounds.Left+iconBounds.Width/2,iconBounds.Top>=iconArea.Top+iconArea.Height/2?iconBounds.Top:iconBounds.Bottom);}
+   var area=Screen.FromPoint(anchor).WorkingArea;
+   // Build before Show: NotifyIcon's automatic placement uses the previous menu size.
+   var direction=anchor.Y>=area.Top+area.Height/2?ToolStripDropDownDirection.AboveLeft:ToolStripDropDownDirection.BelowLeft;
+   trayMenu.Show(anchor,direction);
+  }
   bool PickTrayDisplay(Display target){if(displays==null)return false;int index=displays.FindIndex(x=>x.Device==target.Device&&x.Identity==target.Identity);if(index<0){tray.ShowBalloonTip(3000,"ScreenDock","显示设备已变化，请刷新设备。",ToolTipIcon.Info);return false;}list.SelectedIndex=index;return true;}
   void TrayResult(){if(!Visible&&!demo)tray.ShowBalloonTip(3000,"ScreenDock",status.Text,ToolTipIcon.Info);}
   void BuildTrayMenu(ContextMenuStrip menu){
    while(menu.Items.Count>0){var item=menu.Items[0];menu.Items.RemoveAt(0);item.Dispose();}
-   menu.Items.Add("打开屏幕管理",null,delegate{ShowWindow();});menu.Items.Add(new ToolStripSeparator());
+   menu.Items.Add("打开屏幕管理",null,delegate{ShowWindow();});menu.Items.Add(PresetMenu(true));menu.Items.Add(new ToolStripSeparator());
    if(displays!=null)foreach(var d in displays){
     var target=d;var screen=new ToolStripMenuItem("屏幕 "+d.Number+" · "+d.Name+(d.Active?"":"（已停用）"));menu.Items.Add(screen);
     screen.DropDownItems.Add("打开此屏幕设置",null,delegate{if(PickTrayDisplay(target))ShowWindow();});
