@@ -3,3 +3,5 @@
 *.zip
 *recovery*.xml
 *backup*.txt
+
+dist/

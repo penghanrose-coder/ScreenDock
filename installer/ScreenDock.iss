@@ -1,4 +1,6 @@
-﻿#define AppVersion "1.0.0"
+﻿#ifndef AppVersion
+#define AppVersion "1.0.0"
+#endif
 [Setup]
 AppId={{26C69994-C754-4314-820D-3E207BEAAB68}
 AppName=ScreenDock
@@ -11,7 +13,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\..
-OutputBaseFilename=ScreenDock-Setup-1.0.0-x64
+OutputBaseFilename=ScreenDock-Setup-{#AppVersion}-x64
 SetupIconFile=..\ScreenDock.ico
 UninstallDisplayIcon={app}\ScreenDock.exe
 Compression=lzma2

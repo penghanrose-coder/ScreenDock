@@ -62,3 +62,19 @@
 ## 许可证
 
 项目代码使用 [MIT License](LICENSE)。第三方语言文件保留其原有版权与许可要求。
+
+## 下载和自动发布
+
+- [最新版安装包](https://github.com/penghanrose-coder/ScreenDock/releases/latest/download/ScreenDock-Setup-x64.exe)
+- [全部版本和便携包](https://github.com/penghanrose-coder/ScreenDock/releases)
+
+推送 main 后自动构建和测试，Actions 中保留 14 天测试产物。发布正式版时创建新的版本标签（例如 `v1.0.1`）并推送：
+
+```powershell
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+构建和测试成功后自动发布对应版本的安装包、便携包和 SHA256 校验文件。安装包版本跟随标签，最新版下载链接自动指向最新正式发布。不要移动已发布标签；修改后应使用新版本号。
+
+这套流程自动更新 GitHub 的发布包，不会自动修改用户电脑上的软件。软件内检查更新尚未实现。升级前从托盘退出 ScreenDock，再安装新版即可保留用户配置。安装包目前没有商业代码签名。
