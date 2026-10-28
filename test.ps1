@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -22,4 +22,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Inline layout test compilation failed' }
     & .\InlineLayoutTests.exe
     if ($LASTEXITCODE -ne 0) { throw 'Inline layout tests failed' }
+    & $compiler /nologo /out:UpdateTests.exe /reference:ScreenDock.exe tests\UpdateTests.cs
+    if ($LASTEXITCODE -ne 0) { throw 'Update test compilation failed' }
+    & .\UpdateTests.exe
+    if ($LASTEXITCODE -ne 0) { throw 'Update tests failed' }
 } finally { Pop-Location }

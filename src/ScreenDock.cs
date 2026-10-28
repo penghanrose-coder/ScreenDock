@@ -210,7 +210,7 @@ namespace ScreenDock {
    tray=new NotifyIcon{Icon=Icon,Text="ScreenDock · 屏幕管理",Visible=!demo};tray.MouseUp+=delegate(object sender,MouseEventArgs e){if(e.Button==MouseButtons.Right)ShowTrayMenu(Cursor.Position);};tray.DoubleClick+=delegate{ShowWindow();};tray.BalloonTipClicked+=delegate{ShowWindow();};
    Resize+=delegate{if(WindowState==FormWindowState.Minimized){Hide();if(!demo)tray.ShowBalloonTip(4000,"ScreenDock","已最小化到系统托盘，双击托盘图标可重新打开。",ToolTipIcon.Info);}};
    if(startInTray&&!demo){Opacity=0;ShowInTaskbar=false;}
-   Shown+=async delegate{if(startInTray&&!demo){Hide();Opacity=1;ShowInTaskbar=true;}await DetectSupport();};FormClosing+=delegate(object s,FormClosingEventArgs e){if(!quitting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();}};
+   Shown+=async delegate{if(startInTray&&!demo){Hide();Opacity=1;ShowInTaskbar=true;}await DetectSupport();StartUpdateChecks();};FormClosing+=delegate(object s,FormClosingEventArgs e){if(!quitting&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;Hide();}};
    topologyTimer.Tick+=delegate{if(busy||detecting||brightnessPending.Count>0)return;topologyTimer.Stop();try{RefreshDisplays(true);}catch(Exception ex){status.Text="刷新显示器失败："+ex.Message;}};
    UiZoom.Attach(this,false,false,true);RefreshDisplays();if(Backend.LoadWarning!=null)status.Text=Backend.LoadWarning;
   }
@@ -292,11 +292,12 @@ namespace ScreenDock {
   void OpenModes(){var d=Current;if(d==null||busy||detecting||demo||BrightnessPending(d))return;if(EyeOn(d)){status.Text="请先关闭护眼模式并恢复设置，再调整内置模式。";return;}busy=true;SelectDisplay();try{using(var dialog=new ModeDialog(d))dialog.ShowDialog(this);}finally{busy=false;RefreshDisplays();}}
   public void Screenshot(string file){Show();if(demo&&list.Items.Count>1)list.SelectedIndex=1;Application.DoEvents();using(var bitmap=new Bitmap(Width,Height)){DrawToBitmap(bitmap,new Rectangle(0,0,Width,Height));bitmap.Save(file);}quitting=true;Close();}
   protected override void WndProc(ref Message m){base.WndProc(ref m);if(!demo&&topologyTimer!=null&&!IsDisposed&&!Disposing&&(m.Msg==0x007E||(m.Msg==0x0219&&m.WParam.ToInt64()==0x0007))){topologyTimer.Stop();topologyTimer.Start();}}
-  protected override void Dispose(bool disposing){if(disposing&&topologyTimer!=null)topologyTimer.Dispose();if(disposing&&tray!=null){tray.Visible=false;if(trayMenu!=null)trayMenu.Dispose();tray.Dispose();}base.Dispose(disposing);}
+  protected override void Dispose(bool disposing){if(disposing&&updateTimer!=null)updateTimer.Dispose();if(disposing&&topologyTimer!=null)topologyTimer.Dispose();if(disposing&&tray!=null){tray.Visible=false;if(trayMenu!=null)trayMenu.Dispose();tray.Dispose();}base.Dispose(disposing);}
  }
  public static class Program {
   [STAThread] public static void Main(string[] args) {
    Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+   if(args.Length==2&&args[0]=="--finish-update"){Updates.Finish(args[1]);return;}
    if(args.Length>0 && args[0]=="--make-icon"){File.WriteAllBytes(args[1],Art.IconData());return;}
    if(args.Length>0 && args[0]=="--preview-modes"){using(var form=new ModeDialog(new Display(),true))form.Screenshot(args[1]);return;}
    if(args.Length>0 && args[0]=="--brightness-check"){

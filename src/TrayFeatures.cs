@@ -35,8 +35,8 @@ namespace ScreenDock {
    var settings=new ToolStripMenuItem("设置(&S)");var startup=new ToolStripMenuItem("开机启动（进入托盘）");settings.DropDownItems.Add(startup);
    settings.DropDownOpening+=delegate{try{startup.Checked=StartupRegistration.Enabled();startup.Enabled=true;}catch(Exception ex){startup.Enabled=false;startup.ToolTipText=ex.Message;}};
    startup.Click+=delegate{try{StartupRegistration.Set(!StartupRegistration.Enabled());startup.Checked=StartupRegistration.Enabled();status.Text=startup.Checked?"已开启开机启动，下次登录后进入托盘。":"已关闭开机启动。";}catch(Exception ex){MessageBox.Show(this,"无法修改开机启动："+ex.Message,"ScreenDock");}};
-   settings.DropDownItems.Add(new ToolStripSeparator());settings.DropDownItems.Add("Windows 显示设置…",null,delegate{System.Diagnostics.Process.Start("ms-settings:display");});
-   var help=new ToolStripMenuItem("帮助(&H)");help.DropDownItems.Add(new ToolStripMenuItem("使用说明",null,delegate{System.Diagnostics.Process.Start(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"使用说明.md"));}){ShortcutKeys=Keys.F1});help.DropDownItems.Add("关于 ScreenDock",null,delegate{MessageBox.Show(this,"ScreenDock\n多显示器管理工具 · MIT 开源许可\n最小化后可从系统托盘重新打开。","关于 ScreenDock");});
+   settings.DropDownItems.Add(AutoUpdateItem());settings.DropDownItems.Add(new ToolStripSeparator());settings.DropDownItems.Add("Windows 显示设置…",null,delegate{System.Diagnostics.Process.Start("ms-settings:display");});
+   var help=new ToolStripMenuItem("帮助(&H)");help.DropDownItems.Add(UpdateMenuItem());help.DropDownItems.Add(new ToolStripMenuItem("使用说明",null,delegate{System.Diagnostics.Process.Start(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"使用说明.md"));}){ShortcutKeys=Keys.F1});help.DropDownItems.Add("关于 ScreenDock",null,delegate{MessageBox.Show(this,"ScreenDock "+Updates.Current.ToString(3)+"\n多显示器管理工具 · MIT 开源许可\n最小化后可从系统托盘重新打开。","关于 ScreenDock");});
    bar.Items.AddRange(new ToolStripItem[]{file,screen,PresetMenu(),settings,help});return bar;
   }
   ContextMenuStrip trayMenu;
@@ -55,7 +55,7 @@ namespace ScreenDock {
   void TrayResult(){if(!Visible&&!demo)tray.ShowBalloonTip(3000,"ScreenDock",status.Text,ToolTipIcon.Info);}
   void BuildTrayMenu(ContextMenuStrip menu){
    while(menu.Items.Count>0){var item=menu.Items[0];menu.Items.RemoveAt(0);item.Dispose();}
-   menu.Items.Add("打开屏幕管理",null,delegate{ShowWindow();});menu.Items.Add(PresetMenu(true));menu.Items.Add(new ToolStripSeparator());
+   menu.Items.Add("打开屏幕管理",null,delegate{ShowWindow();});menu.Items.Add(PresetMenu(true));menu.Items.Add(UpdateMenuItem());menu.Items.Add(new ToolStripSeparator());
    if(displays!=null)foreach(var d in displays){
     var target=d;var screen=new ToolStripMenuItem("屏幕 "+d.Number+" · "+d.Name+(d.Active?"":"（已停用）"));menu.Items.Add(screen);
     screen.DropDownItems.Add("打开此屏幕设置",null,delegate{if(PickTrayDisplay(target))ShowWindow();});

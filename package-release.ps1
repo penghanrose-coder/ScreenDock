@@ -1,5 +1,5 @@
-$ErrorActionPreference = 'Stop'
-$version = '1.0.0'
+﻿$ErrorActionPreference = 'Stop'
+$version = (Get-Content VERSION -Raw).Trim()
 if ($env:REF_TYPE -eq 'tag') {
     if ($env:REF_NAME -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Use a tag such as v1.0.1' }
     $version = $Matches[1]
